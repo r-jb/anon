@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang='en'>
+
+	<head>
+		<title>Script Magic</title>
+		<link rel='shortcut icon' href='img/favicon.png'>
+		<link rel='stylesheet' href='css/style.css'>
+		<script src='js/async.js'></script>
+	</head>
+
+	<body>
+		<include-view src='header'>Loading header...</include-view>
+
+		<div class='element_off'>
+			<h2>System Privacy</h2>
+			<p>This library script is a web package.</p>
+			<button id='system_bundle' onclick='toggle(this, "bundle", "system")' value='true'>Run</button>
+		</div>
+
+		<div class='element_off'>
+			<h2>Web Fingerprinting</h2>
+			<p>This library script is....</p>
+			<button id='web_bundle' onclick='toggle(this, "bundle", "web")' value='true'>Run</button>
+		</div>
+
+		<div class='element_off'>
+			<h2>All</h2>
+			<p>This library script is....</p>
+			<button id='all_bundle' onclick='toggle(this, "bundle", "all")' value='true'>Run</button>
+		</div>
+
+		<br><br><br>
+
+		<include-view src='footer'>Loading footer...</include-view>
+		<script src='js/include.js'></script>
+	</body>
+
+</html>
