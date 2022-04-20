@@ -1,168 +1,208 @@
 #!/bin/sh
 
-function main {
-	init
-	check_requirements
+GREEN='\033[0;32m'
+BLUE='\033[0;34m'
+ORANGE='\033[0;33m'
+RED='\033[0;31m'
+NOCOLOR='\033[0m'
+DIR="`dirname $0`"
 
-	case "$1" in
-		start)
-			clean
-			start
-			clean
-			;;
-		stop)
-			clean
-			stop
-			clean
-			exit
-			;;
-		restart)
-			$0 stop
-			$0 start
-			;;
-		status)
-			if [ -e $pid ]; then
-				printf "[i] Traffic generator is running @ pid $(cat $pid)\n"
-			else
-				printf "[i] Traffic generator is NOT running\n"
-			fi
-			info
-			;;
-		install)
-			install
-			exit
-			;;
-		*)
-			printf "Usage: $0 {start|stop|status|restart|install}\n\n"
-			esac
-			exit 0
+echo_success() {
+	echo "${GREEN}[+] - ${@}${NOCOLOR}"
 }
 
-function init {
+echo_info() {
+	echo "${BLUE}[i] - ${@}${NOCOLOR}"
+}
+
+echo_warning() {
+	echo "${ORANGE}/!\ - ${@}${NOCOLOR} !"
+}
+
+echo_error() {
+	echo "${RED}[-] - ${@}${NOCOLOR}"
+}
+
+check_root() {
 	if (($EUID != 0)); then
-		printf "[!] Please run with root permissions\n"
-		exit 1
-	fi
-
-	green='\033[0;32m'
-	orange='\033[0;33m'
-	red='\033[0;31m'
-	nc='\033[0m'
-	pid="/var/run/anon-traffic.pid"
-}
-
-function check_requirements {
-	local msg="not found\n[i] Please run $0 install"
-
-	if [ ! -d /usr/bin/nipe ]; then
-		printf "[!] nipe $msg\n"
-		exit 1
-	fi
-
-	if [ ! -e /usr/bin/macchanger ]; then
-		printf "[!] macchanger $msg\n"
-		exit 1
-	fi
-
-	if [ ! -d /usr/bin/web-traffic-generator ]; then
-		printf "[!] web-traffic-generator $msg\n"
+		echo_error 'Please run with root permissions'
 		exit 1
 	fi
 }
 
-function clean {
-	printf ""
+info() {
+	echo "Hostname:\t`hostname`\n"
+
+	echo 'Mac address:'
+	for iface in "/sys/class/net/"*
+	do
+		iface_name="`basename $iface`"
+		[ "$iface_name" != 'lo' ] && echo "\t\t$iface_name: `cat $iface/address`"
+	done
+	echo
+
+	echo "IP address:\t`curl -s https://check.torproject.org | grep 'Your IP address appears to be:' | cut -d '>' -f 3 | cut -f 1 -d '<'`\n"
 }
 
-function start {
-	#macchanger
-	ip link set $interface down
-	macchanger -r $interface > /dev/null
-	ip link set $interface up
-	printf "\t$green[+]$nc Mac address\n"
-
-	read -p "Press [enter] when the connection is back on"
-
-	#nipe
-	cd /usr/bin/nipe && \
-	perl /usr/bin/nipe/nipe.pl start > /dev/null && \
-	printf "\t$green[+]$nc IP address\n"
-
-	#hostname
-	hostname $(cat /dev/urandom | tr -cd 'a-f0-9' | head -c 10) && \
-	printf "\t$green[+]$nc Hostname: $(hostname)\n"
-
-	#web-traffic-generator
-	python /usr/bin/web-traffic-generator/gen.py > /dev/null 2>&1 &
-	echo $! > $pid
-	[ -e $pid ] && printf "\t$green[+]$nc Fake traffic\n"
+usage() {
+	echo "Usage: `basename $0` <module> <start|stop|help>\n"
 }
 
-function stop {
-	#web-traffic-generator
-	[ -e $pid ] && kill $(cat $pid) > /dev/null
-	rm -f $pid > /dev/null
-	printf "\t$red[-]$nc Fake traffic\n"
+main() {
 
-	#hostname
-	hostname $(hostnamectl --static)
-
-	#nipe
-	cd /usr/bin/nipe && \
-	perl nipe.pl stop > /dev/null && \
-	printf "\t$red[-]$nc IP adress\n"
-
-	#macchanger
-	ip link set $interface down > /dev/null && \
-	sleep 2 && \
-	macchanger -p $interface > /dev/null && \
-	sleep 2 && \
-	ip link set $interface up > /dev/null && \
-	printf "\t$red[-]$nc Mac address\n\t$red[-]$nc Hostname\n"
+	# Go to the script's directory
+	cd "$DIR"
+	"$@"
 }
 
-function info {
-	printf "
-\tHostname:    $(hostname)
-\tMac address: $(cat /sys/class/net/$interface/address)
-\tIP address:  $(wget -qO- https://start.parrotsec.org/ip/\n\n)"
-#wget -qO- https://start.parrotsec.org/ip/
-#dig @resolver1.opendns.com ANY myip.opendns.com +short
-}
+###################### Modules
 
-function install {
-	dir="/tmp/"
-	cd "$dir"
+# WEB UI
 
-	#macchanger perl python pip git
-	apt update && \
-	apt -y install macchanger perl python python-pip git
-	apt -y autoremove
-
-	#nipe
-	git clone https://github.com/GouveaHeitor/nipe && \
-	cp -a --remove-destination nipe /usr/bin/ && \
-	cd /usr/bin/nipe && \
-	perl nipe.pl install && \
-	cpan install Switch JSON Config::Simple
-	cd "$dir"
-
-	#web-traffic-generator
-	if [ -f /usr/bin/web-traffic-generator/config.py ]; then
-		wget https://raw.githubusercontent.com/ReconInfoSec/web-traffic-generator/master/gen.py && \
-		cp -a --remove-destination web-traffic-generator/gen.py /usr/bin/web-traffic-generator/
+webui_on() {
+	if [ ! -f '.lock_webui' ]
+	then
+		echo 1 > '.lock_webui'
+		trap 'webui_off' 2
+		echo_info 'Please go to http://localhost'
+		echo_info 'Web server running, press Ctrl+C to stop it...'
+		php -S localhost:80 -t "$DIR/webserver" >/dev/null 2>/dev/null
 	else
-		pip install requests && \
-		git clone https://github.com/ReconInfoSec/web-traffic-generator && \
-		cp -a --remove-destination web-traffic-generator /usr/bin/
+		echo_error 'Web server is already running'
+	fi
+}
+
+webui_off() {
+
+	# Release trap
+	trap - 2
+
+	# Kill the webserver if running
+	webui_check && killall php >/dev/null 2>/dev/null
+
+	# Remove the lock
+	rm -f '.lock_webui' && \
+	echo_success '\nStopped web server'
+
+	# Exit code 2
+	exit 2
+}
+
+webui_check() {
+	out=1
+	php_processes="$((`ps auxww | grep 'php -S localhost:80' | wc | awk '{print $1}'` - 1))"
+	if [ "$php_processes" -gt "0" ]
+	then
+		out=0
+	fi
+	return $out
+}
+
+# TIMEZONE
+
+timezone_on() {
+
+	# Backup timezone settings
+	if [ ! -f "$DIR/backup/timezone" ]
+	then
+		echo_info 'No timezone backup found, creating one'
+		timedatectl show --property=Timezone --property=NTP > "$DIR/backup/timezone" && \
+		echo_success 'Backed up timezone' || \
+		{echo_error 'Error backing timezone, exiting'; exit 1}
 	fi
 
-	cd ~
-	rm -rf "$dir"
+	timedatectl set-ntp on && echo_success 'NTP activated'
+	timedatectl set-timezone 'Etc/UTC' && echo_success 'Timezone set to UTC'
 }
 
-function exit {
-	[ -e $pid ] && rm -f $pid
+timezone_off() {
+
+	# Restore timezone settings
+	if [ -f "$DIR/backup/timezone" ]
+	then
+		echo_info 'Restoring timezone'
+		source "$DIR/backup/timezone" && \
+		{timedatectl set-ntp "$NTP" && echo_success 'NTP state restored' || {echo_error 'Error restoring NTP setting, exiting'; exit 1}} && \
+		{timedatectl set-timezone "$Timezone" && echo_success "Timezone restored to $Timezone" || {echo_error 'Error restoring timezone, exiting'; exit 1}} && \
+		rm -f "$DIR/backup/timezone"
+	else
+		echo_warning 'No timezone backup found'
+	fi
 }
 
-main "$1"
+timezone_check() {
+	out=1
+	current_timezone="`timedatectl | grep 'Time zone:' | awk '{print $3}'`"
+	if [ "$current_timezone" = 'Etc/UTC' ]
+	then
+		out=0
+	fi
+	return $out
+}
+
+# HOSTNAME
+
+hostname_on() {
+	# Only change the transcient hostname
+	hostname "`cat /dev/urandom | tr -cd 'a-f0-9' | head -c 10`" && echo_success 'Random hostname set'
+}
+
+hostname_off() {
+	# Reset the transcient hostname to the static hostname
+	hostname "`hostname -A`" && echo_success 'Static hostname set'
+}
+
+hostname_check() {
+	out=1
+	if [ "`hostname`" != "`hostname -A`" ]
+	then
+		out=0
+	fi
+	return $out
+}
+
+# KALITORIFY
+
+kalitorify_on() {
+
+	# Backup iptable rules
+	if [ ! -f "$DIR/backup/iptables" ]
+	then
+		echo_info 'No iptables backup found, creating one'
+		iptables-save > "$DIR/backup/iptables" && \
+		echo_success 'Backed up iptables rules' || \
+		{echo_error 'Error backing iptables rules, exiting'; exit 1}
+	fi
+
+	kalitorify --tor
+}
+
+kalitorify_off() {
+	# ! TODO: cut internet connections here to prevent leaks
+	kalitorify --clearnet
+
+	# Restore iptable rules
+	if [ -f "$DIR/backup/iptables" ]
+	then
+		echo_info 'Restoring iptables rules'
+		iptables-restore < "$DIR/backup/iptables" && \
+		{rm -f "$DIR/backup/iptables"; echo_success 'Restored iptables rules'} || \
+		{echo_error 'Error restoring iptables rules, exiting'; exit 1}
+	else
+		echo_warning 'No iptables rules backup found'
+	fi
+
+	# ! TODO: re-enable internet connections here to prevent leaks
+}
+
+kalitorify_check() {
+	out=1
+	if [ "`kalitorify --status`" != "`hostname -A`" ]
+	then
+		out=0
+	fi
+	return $out
+}
+
+usage
+main "$@"

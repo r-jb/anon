@@ -23,13 +23,12 @@
 
 			// Execute system command
 			//exec(string COMMAND, array OUTPUT, int RETURN_VARIABLE);
-			exec("sh script.sh $module $state_cmd", null, $exit_code);
+			exec("sh ../anon.sh $module $state_cmd", null, $exit_code);
 
 			// Set output status depending on execution
 			if ($exit_code == 0) {
 				$output_state = true;
 			}
-
 		}
 
 		return $output_state;
@@ -44,5 +43,7 @@
 //	if (ifset()) {
 		# code...
 //	}
+
 	echo toggle_test($_GET['state']);
+	//echo toggle_module($_GET['value'], $_GET['state']);
 ?>
