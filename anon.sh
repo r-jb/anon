@@ -52,6 +52,12 @@ info() {
 
 usage() {
 	echo "Usage: `basename $0` <module> <start|stop|help>\n"
+	echo 'Currently supported modules are:
+	webui - Web interface for the anon script
+	timezone - Change the timezone to UTC
+	hostname - Randomize the hostname
+	kalitorify - Utility to run TOR as a system proxy
+	'
 }
 
 main() {
@@ -91,7 +97,7 @@ webui_off() {
 	trap - 2
 
 	# Kill the webserver if running
-	webui_check && HIDE kill -9 php
+	webui_check && HIDE killall php
 
 	# Remove the lock
 	rm -f '/tmp/.lock_webui' && \
@@ -135,12 +141,12 @@ timezone_on() {
 	[ ! -d "$DATA_DIR/backup" ] && mkdir "$DATA_DIR/backup"
 
 	# Backup timezone settings
-	if [ ! -f "$DATA_DIR/backup/timezone" ]
+	if [ ! -s "$DATA_DIR/backup/timezone" ]
 	then
 		echo_info 'No timezone backup found, creating one'
 		timedatectl show --property=Timezone --property=NTP > "$DATA_DIR/backup/timezone" && \
 		echo_success 'Backed up timezone' || \
-		{echo_error 'Error backing timezone, exiting'; exit 1}
+		{ echo_error 'Error backing timezone, exiting'; exit 1; }
 	fi
 
 	timedatectl set-ntp on && echo_success 'NTP activated'
@@ -150,26 +156,55 @@ timezone_on() {
 timezone_off() {
 
 	# Restore timezone settings
-	if [ -f "$DATA_DIR/backup/timezone" ]
+	if [ -s "$DATA_DIR/backup/timezone" ]
 	then
 		echo_info 'Restoring timezone'
-		source "$DATA_DIR/backup/timezone" && \
-		{timedatectl set-ntp "$NTP" && echo_success 'NTP state restored' || {echo_error 'Error restoring NTP setting, exiting'; exit 1}} && \
-		{timedatectl set-timezone "$Timezone" && echo_success "Timezone restored to $Timezone" || {echo_error 'Error restoring timezone, exiting'; exit 1}} && \
-		rm -f "$DATA_DIR/backup/timezone"
+
+		# Exporting the values from the backup
+		while IFS== read -r key value; do
+			export "$key=$value"
+		done < "$DATA_DIR/backup/timezone"
+
+		{ timedatectl set-ntp "$NTP" && echo_success 'NTP state restored' || { echo_error 'Error restoring NTP setting, exiting'; exit 1; } } && \
+		{ timedatectl set-timezone "$Timezone" && echo_success "Timezone restored to $Timezone" || { echo_error 'Error restoring timezone, exiting'; exit 1; } } && \
+		echo_success 'Restored timezone from backup'
+		rm -f "$DATA_DIR/backup/timezone" && \
+		echo_success 'Removed backup'
 	else
-		echo_warning 'No timezone backup found'
+		echo_error 'No timezone backup found or file empty'
 	fi
+
+	# Return exit code
+	timezone_check
 }
 
 timezone_check() {
 	out=1
-	current_timezone="`timedatectl | grep 'Time zone:' | awk '{print $3}'`"
-	if [ "$current_timezone" = 'Etc/UTC' ]
+	current_timezone="`timedatectl show --property=Timezone --value`"
+	current_ntp_status="`timedatectl show --property=NTP --value`"
+	if [ "$current_timezone" = 'Etc/UTC' ] && [ "$current_ntp_status" = 'yes' ]
 	then
 		out=0
 	fi
 	return $out
+}
+
+timezone_cmd() {
+	case "$1" in
+		'on'|'start') timezone_on;;
+		'off'|'stop') timezone_off;;
+		*)
+			timezone_check
+			status="$?"
+
+			if [ "$status" -eq '0' ]
+			then
+				echo_success 'Timezone module active'
+			else
+				echo_warning 'Timezone module is not active'
+			fi
+			return $status
+	esac
 }
 
 # HOSTNAME
@@ -224,42 +259,70 @@ kalitorify_on() {
 	[ ! -d "$DATA_DIR/backup" ] && mkdir "$DATA_DIR/backup"
 
 	# Backup iptable rules
-	if [ ! -f "$DATA_DIR/backup/iptables" ]
+	if [ ! -s "$DATA_DIR/backup/iptables" ]
 	then
 		echo_info 'No iptables backup found, creating one'
 		iptables-save > "$DATA_DIR/backup/iptables" && \
 		echo_success 'Backed up iptables rules' || \
-		{echo_error 'Error backing iptables rules, exiting'; exit 1}
+		{ echo_error 'Error backing iptables rules, exiting'; exit 1; }
 	fi
 
-	kalitorify --tor
+	echo_info 'Starting kalitorify'
+	kalitorify --tor && \
+	echo_success 'Kalitorify started'
 }
 
 kalitorify_off() {
-	# ! TODO: cut internet connections here to prevent leaks
+	# ! TODO: cut off internet here to prevent leaks
+	echo_info 'Starting kalitorify'
 	kalitorify --clearnet
 
 	# Restore iptable rules
-	if [ -f "$DATA_DIR/backup/iptables" ]
+	if [ -s "$DATA_DIR/backup/iptables" ]
 	then
 		echo_info 'Restoring iptables rules'
 		iptables-restore < "$DATA_DIR/backup/iptables" && \
-		{rm -f "$DATA_DIR/backup/iptables"; echo_success 'Restored iptables rules'} || \
-		{echo_error 'Error restoring iptables rules, exiting'; exit 1}
+		{ rm -f "$DATA_DIR/backup/iptables"; echo_success 'Restored iptables rules'; } || \
+		{ echo_error 'Error restoring iptables rules, exiting'; exit 1; }
+	elif [ -f "$DATA_DIR/backup/iptables" ] && [ ! -s "$DATA_DIR/backup/iptables" ]
+	then
+		echo_error 'Iptables backup found but empty, removing it'
+		rm -f "$DATA_DIR/backup/iptables"
 	else
-		echo_warning 'No iptables rules backup found'
+		echo_error 'No iptables backup found'
 	fi
 
-	# ! TODO: re-enable internet connections here to prevent leaks
+	# ! TODO: re-enable internet here to prevent leaks
+}
+
+kalitorify_restart() {
+	echo_info 'Restarting kalitorify'
+	kalitorify --restart && \
+	echo_success 'Kalitorify restarted'
 }
 
 kalitorify_check() {
-	out=1
-	if [ "`kalitorify --status`" != "`hostname -A`" ]
-	then
-		out=0
-	fi
+	HIDE kalitorify --status && out=0 || out=1
 	return $out
+}
+
+kalitorify_cmd() {
+	case "$1" in
+		'on'|'start') kalitorify_on;;
+		'off'|'stop') kalitorify_off;;
+		'restart') kalitorify_restart;;
+		*)
+			kalitorify_check
+			status="$?"
+
+			if [ "$status" -eq '0' ]
+			then
+				echo_success 'Kalitorify is active'
+			else
+				echo_warning 'Kalitorify is not active'
+			fi
+			return $status
+	esac
 }
 
 main "$@"
