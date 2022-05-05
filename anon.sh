@@ -5,7 +5,12 @@ BLUE='\033[0;34m'
 ORANGE='\033[0;33m'
 RED='\033[0;31m'
 NOCOLOR='\033[0m'
-DIR="`dirname $0`"
+DATA_DIR='/usr/share/anon'
+HIDE='>/dev/null 2>/dev/null'
+
+HIDE() {
+	"$@" >/dev/null 2>/dev/null
+}
 
 echo_success() {
 	echo "${GREEN}[+] - ${@}${NOCOLOR}"
@@ -16,7 +21,7 @@ echo_info() {
 }
 
 echo_warning() {
-	echo "${ORANGE}/!\ - ${@}${NOCOLOR} !"
+	echo "${ORANGE}/!\ - ${@} !${NOCOLOR}"
 }
 
 echo_error() {
@@ -24,7 +29,8 @@ echo_error() {
 }
 
 check_root() {
-	if (($EUID != 0)); then
+	if [ "`id -u`" -ne '0' ]
+	then
 		echo_error 'Please run with root permissions'
 		exit 1
 	fi
@@ -49,10 +55,17 @@ usage() {
 }
 
 main() {
+	check_root
 
-	# Go to the script's directory
-	cd "$DIR"
-	"$@"
+	if [ "$#" -eq '0' ]
+	then
+		echo menu
+	else
+		case "$1" in
+			'webui'|'timezone'|'hostname'|'kalitorify') $1_cmd "$2";;
+			*) usage
+		esac
+	fi
 }
 
 ###################### Modules
@@ -60,13 +73,13 @@ main() {
 # WEB UI
 
 webui_on() {
-	if [ ! -f '.lock_webui' ]
+	if [ ! -f '/tmp/.lock_webui' ]
 	then
 		echo 1 > '.lock_webui'
 		trap 'webui_off' 2
 		echo_info 'Please go to http://localhost'
 		echo_info 'Web server running, press Ctrl+C to stop it...'
-		php -S localhost:80 -t "$DIR/webserver" >/dev/null 2>/dev/null
+		HIDE php -S localhost:80 -t "$DATA_DIR/webserver"
 	else
 		echo_error 'Web server is already running'
 	fi
@@ -78,11 +91,11 @@ webui_off() {
 	trap - 2
 
 	# Kill the webserver if running
-	webui_check && killall php >/dev/null 2>/dev/null
+	webui_check && HIDE kill -9 php
 
 	# Remove the lock
-	rm -f '.lock_webui' && \
-	echo_success '\nStopped web server'
+	rm -f '/tmp/.lock_webui' && \
+	{ echo; echo_success 'Stopped web server'; }
 
 	# Exit code 2
 	exit 2
@@ -98,15 +111,34 @@ webui_check() {
 	return $out
 }
 
+webui_cmd() {
+	case "$1" in
+		'on'|'start') webui_on;;
+		'off'|'stop') webui_off;;
+		*)
+			webui_check
+			status="$?"
+
+			if [ "$status" -eq '0' ]
+			then
+				echo_success 'Web server is active'
+			else
+				echo_warning 'Web server is not active'
+			fi
+			return $status
+	esac
+}
+
 # TIMEZONE
 
 timezone_on() {
+	[ ! -d "$DATA_DIR/backup" ] && mkdir "$DATA_DIR/backup"
 
 	# Backup timezone settings
-	if [ ! -f "$DIR/backup/timezone" ]
+	if [ ! -f "$DATA_DIR/backup/timezone" ]
 	then
 		echo_info 'No timezone backup found, creating one'
-		timedatectl show --property=Timezone --property=NTP > "$DIR/backup/timezone" && \
+		timedatectl show --property=Timezone --property=NTP > "$DATA_DIR/backup/timezone" && \
 		echo_success 'Backed up timezone' || \
 		{echo_error 'Error backing timezone, exiting'; exit 1}
 	fi
@@ -118,13 +150,13 @@ timezone_on() {
 timezone_off() {
 
 	# Restore timezone settings
-	if [ -f "$DIR/backup/timezone" ]
+	if [ -f "$DATA_DIR/backup/timezone" ]
 	then
 		echo_info 'Restoring timezone'
-		source "$DIR/backup/timezone" && \
+		source "$DATA_DIR/backup/timezone" && \
 		{timedatectl set-ntp "$NTP" && echo_success 'NTP state restored' || {echo_error 'Error restoring NTP setting, exiting'; exit 1}} && \
 		{timedatectl set-timezone "$Timezone" && echo_success "Timezone restored to $Timezone" || {echo_error 'Error restoring timezone, exiting'; exit 1}} && \
-		rm -f "$DIR/backup/timezone"
+		rm -f "$DATA_DIR/backup/timezone"
 	else
 		echo_warning 'No timezone backup found'
 	fi
@@ -143,33 +175,59 @@ timezone_check() {
 # HOSTNAME
 
 hostname_on() {
-	# Only change the transcient hostname
-	hostname "`cat /dev/urandom | tr -cd 'a-f0-9' | head -c 10`" && echo_success 'Random hostname set'
+	random_name="`cat /dev/urandom | tr -cd 'a-f0-9' | head -c 10`"
+	sed -i "s/127.0.1.1\t`hostnamectl status --static | tr -d ' '`/127.0.1.1\t$random_name/g" "/etc/hosts" && \
+	hostname "$random_name" && \
+	echo_success 'Random hostname set'
 }
 
 hostname_off() {
 	# Reset the transcient hostname to the static hostname
-	hostname "`hostname -A`" && echo_success 'Static hostname set'
+	current_hostname="`hostnamectl status --transient | tr -d ' '`"
+	static_hostname="`hostnamectl status --static | tr -d ' '`"
+	sed -i "s/127.0.1.1\t$current_hostname/127.0.1.1\t$static_hostname/g" "/etc/hosts" && \
+	hostname "$static_hostname" && \
+	echo_success 'Static hostname set'
 }
 
+# Returns true if hostname module is running
 hostname_check() {
 	out=1
-	if [ "`hostname`" != "`hostname -A`" ]
+	if [ "`hostnamectl status --transient | tr -d ' '`" != "`hostnamectl status --static | tr -d ' '`" ]
 	then
 		out=0
 	fi
 	return $out
 }
 
+hostname_cmd() {
+	case "$1" in
+		'on'|'start') hostname_on;;
+		'off'|'stop') hostname_off;;
+		*)
+			hostname_check
+			status="$?"
+
+			if [ "$status" -eq '0' ]
+			then
+				echo_success 'Random hostname is active'
+			else
+				echo_warning 'Random hostname is not active'
+			fi
+			return $status
+	esac
+}
+
 # KALITORIFY
 
 kalitorify_on() {
+	[ ! -d "$DATA_DIR/backup" ] && mkdir "$DATA_DIR/backup"
 
 	# Backup iptable rules
-	if [ ! -f "$DIR/backup/iptables" ]
+	if [ ! -f "$DATA_DIR/backup/iptables" ]
 	then
 		echo_info 'No iptables backup found, creating one'
-		iptables-save > "$DIR/backup/iptables" && \
+		iptables-save > "$DATA_DIR/backup/iptables" && \
 		echo_success 'Backed up iptables rules' || \
 		{echo_error 'Error backing iptables rules, exiting'; exit 1}
 	fi
@@ -182,11 +240,11 @@ kalitorify_off() {
 	kalitorify --clearnet
 
 	# Restore iptable rules
-	if [ -f "$DIR/backup/iptables" ]
+	if [ -f "$DATA_DIR/backup/iptables" ]
 	then
 		echo_info 'Restoring iptables rules'
-		iptables-restore < "$DIR/backup/iptables" && \
-		{rm -f "$DIR/backup/iptables"; echo_success 'Restored iptables rules'} || \
+		iptables-restore < "$DATA_DIR/backup/iptables" && \
+		{rm -f "$DATA_DIR/backup/iptables"; echo_success 'Restored iptables rules'} || \
 		{echo_error 'Error restoring iptables rules, exiting'; exit 1}
 	else
 		echo_warning 'No iptables rules backup found'
@@ -204,5 +262,4 @@ kalitorify_check() {
 	return $out
 }
 
-usage
 main "$@"
