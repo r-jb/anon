@@ -4,6 +4,7 @@
 
 ## Install
 Copy and paste this in your terminal for a quick install.
+
 `curl -fsSL https://github.com/r-jb/anon/raw/main/install.sh | sh`
 
 ## Usage

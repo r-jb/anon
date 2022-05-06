@@ -12,6 +12,10 @@ HIDE() {
 	"$@" >/dev/null 2>/dev/null
 }
 
+LOWER() {
+	echo "$@" | tr '[:upper:]' '[:lower:]' | tr -d ' '
+}
+
 echo_success() {
 	echo "${GREEN}[+] - ${@}${NOCOLOR}"
 }
@@ -51,27 +55,85 @@ info() {
 }
 
 usage() {
-	echo "Usage: `basename $0` <module> <start|stop|help>\n"
-	echo 'Currently supported modules are:
-	webui - Web interface for the anon script
-	timezone - Change the timezone to UTC
-	hostname - Randomize the hostname
-	kalitorify - Utility to run TOR as a system proxy
-	'
+	echo "Usage: `basename $0` <module> <start|stop>\n"
+	echo "Currently supported modules are:
+	${BLUE}webui${NOCOLOR} - Web interface for the anon script
+	${BLUE}timezone${NOCOLOR} - Change the timezone to UTC
+	${BLUE}hostname${NOCOLOR} - Randomize the hostname
+	${BLUE}kalitorify${NOCOLOR} - Utility to run TOR as a system proxy
+	${BLUE}wtg${NOCOLOR} - Fake web traffic generator
+	${BLUE}macchanger${NOCOLOR} - Changes the MAC address of every interface
+	"
 }
 
 main() {
 	check_root
+	[ ! -d "$DATA_DIR/backup" ] && mkdir "$DATA_DIR/backup"
 
-	if [ "$#" -eq '0' ]
-	then
-		echo menu
-	else
-		case "$1" in
-			'webui'|'timezone'|'hostname'|'kalitorify') $1_cmd "$2";;
-			*) usage
-		esac
-	fi
+	module="`LOWER $1`"
+	cmd="`LOWER $2`"
+
+	case "$module" in
+		'webui'|'timezone'|'hostname'|'kalitorify'|'wtg'|'macchanger')
+
+			case "$cmd" in
+
+				'start')
+					${module}_check
+					status="$?"
+
+					# wtg module can be restarted multiple times to increase traffic
+					if [ "$status" -eq '0' ] && [ "$module" != 'wtg' ]
+					then
+						echo_error "Module $module is already started"
+						exit 1
+					else
+						echo_info "Starting module $module"
+						${module}_on && \
+						echo_success "Started module $module" || \
+						echo_error "Error starting module $module"
+					fi
+					;;
+
+				'stop')
+					${module}_check
+					status="$?"
+
+					if [ "$status" -eq '0' ]
+					then
+						echo_info "Stopping module $module"
+						${module}_off && \
+						echo_success "Stopping module $module" || \
+						echo_error "Error stopping module $module"
+					else
+						echo_error "Module $module is already stopped"
+						exit 1
+					fi
+					;;
+
+				'info')
+					echo "Hostname: `hostname`"
+					echo "IP address: `hostname`"
+					;;
+
+				'')
+					${module}_check
+					status="$?"
+
+					if [ "$status" -eq '0' ]
+					then
+						echo_success "Module $module is active"
+					else
+						echo_warning "Module $module is not active"
+					fi
+					;;
+
+				*) usage
+			esac
+			;;
+
+		*) usage
+	esac
 }
 
 ###################### Modules
@@ -117,40 +179,23 @@ webui_check() {
 	return $out
 }
 
-webui_cmd() {
-	case "$1" in
-		'on'|'start') webui_on;;
-		'off'|'stop') webui_off;;
-		*)
-			webui_check
-			status="$?"
-
-			if [ "$status" -eq '0' ]
-			then
-				echo_success 'Web server is active'
-			else
-				echo_warning 'Web server is not active'
-			fi
-			return $status
-	esac
-}
-
 # TIMEZONE
 
 timezone_on() {
-	[ ! -d "$DATA_DIR/backup" ] && mkdir "$DATA_DIR/backup"
 
-	# Backup timezone settings
-	if [ ! -s "$DATA_DIR/backup/timezone" ]
-	then
-		echo_info 'No timezone backup found, creating one'
-		timedatectl show --property=Timezone --property=NTP > "$DATA_DIR/backup/timezone" && \
-		echo_success 'Backed up timezone' || \
-		{ echo_error 'Error backing timezone, exiting'; exit 1; }
-	fi
+	# Remove previous backup
+	[ -f "$DATA_DIR/backup/timezone" ] && rm -f "$DATA_DIR/backup/timezone"
+
+	# Backup iptable rules
+	echo_info 'Creating backup'
+	timedatectl show --property=Timezone --property=NTP > "$DATA_DIR/backup/timezone" && \
+	echo_success 'Backed up timezone' || \
+	{ echo_error 'Error backing timezone, exiting'; exit 1; }
 
 	timedatectl set-ntp on && echo_success 'NTP activated'
 	timedatectl set-timezone 'Etc/UTC' && echo_success 'Timezone set to UTC'
+
+	timezone_check
 }
 
 timezone_off() {
@@ -167,15 +212,17 @@ timezone_off() {
 
 		{ timedatectl set-ntp "$NTP" && echo_success 'NTP state restored' || { echo_error 'Error restoring NTP setting, exiting'; exit 1; } } && \
 		{ timedatectl set-timezone "$Timezone" && echo_success "Timezone restored to $Timezone" || { echo_error 'Error restoring timezone, exiting'; exit 1; } } && \
-		echo_success 'Restored timezone from backup'
 		rm -f "$DATA_DIR/backup/timezone" && \
 		echo_success 'Removed backup'
+	elif [ -f "$DATA_DIR/backup/timezone" ] && [ ! -s "$DATA_DIR/backup/timezone" ]
+	then
+		echo_error 'Timezone backup found but empty, removing it'
+		rm -f "$DATA_DIR/backup/timezone"
 	else
-		echo_error 'No timezone backup found or file empty'
+		echo_error 'No timezone backup found'
 	fi
 
-	# Return exit code
-	timezone_check
+	! timezone_check
 }
 
 timezone_check() {
@@ -187,24 +234,6 @@ timezone_check() {
 		out=0
 	fi
 	return $out
-}
-
-timezone_cmd() {
-	case "$1" in
-		'on'|'start') timezone_on;;
-		'off'|'stop') timezone_off;;
-		*)
-			timezone_check
-			status="$?"
-
-			if [ "$status" -eq '0' ]
-			then
-				echo_success 'Timezone module active'
-			else
-				echo_warning 'Timezone module is not active'
-			fi
-			return $status
-	esac
 }
 
 # HOSTNAME
@@ -235,47 +264,25 @@ hostname_check() {
 	return $out
 }
 
-hostname_cmd() {
-	case "$1" in
-		'on'|'start') hostname_on;;
-		'off'|'stop') hostname_off;;
-		*)
-			hostname_check
-			status="$?"
-
-			if [ "$status" -eq '0' ]
-			then
-				echo_success 'Random hostname is active'
-			else
-				echo_warning 'Random hostname is not active'
-			fi
-			return $status
-	esac
-}
-
 # KALITORIFY
 
 kalitorify_on() {
-	[ ! -d "$DATA_DIR/backup" ] && mkdir "$DATA_DIR/backup"
+
+	# Remove previous backup
+	[ -f "$DATA_DIR/backup/iptables" ] && rm -f "$DATA_DIR/backup/iptables"
 
 	# Backup iptable rules
-	if [ ! -s "$DATA_DIR/backup/iptables" ]
-	then
-		echo_info 'No iptables backup found, creating one'
-		iptables-save > "$DATA_DIR/backup/iptables" && \
-		echo_success 'Backed up iptables rules' || \
-		{ echo_error 'Error backing iptables rules, exiting'; exit 1; }
-	fi
+	echo_info 'Creating backup'
+	iptables-save > "$DATA_DIR/backup/iptables" && \
+	echo_success 'Backed up iptables rules' || \
+	{ echo_error 'Error backing iptables rules, exiting'; exit 1; }
 
-	echo_info 'Starting kalitorify'
-	kalitorify --tor && \
-	echo_success 'Kalitorify started'
+	kalitorify --tor
 }
 
 kalitorify_off() {
-	# ! TODO: cut off internet here to prevent leaks
-	echo_info 'Starting kalitorify'
 	kalitorify --clearnet
+	status="$?"
 
 	# Restore iptable rules
 	if [ -s "$DATA_DIR/backup/iptables" ]
@@ -292,37 +299,107 @@ kalitorify_off() {
 		echo_error 'No iptables backup found'
 	fi
 
-	# ! TODO: re-enable internet here to prevent leaks
-}
-
-kalitorify_restart() {
-	echo_info 'Restarting kalitorify'
-	kalitorify --restart && \
-	echo_success 'Kalitorify restarted'
+	return $status
 }
 
 kalitorify_check() {
-	HIDE kalitorify --status && out=0 || out=1
+	HIDE kalitorify --status
+	return $?
+}
+
+# WEB-TRAFFIC-GENERATOR
+
+wtg_on() {
+	HIDE nohup python "$DATA_DIR/lib/gen.py" > /dev/null &
+	wtg_check
+}
+
+wtg_off() {
+	wtg_process_pid="`pgrep --full \"python $DATA_DIR/lib/gen.py\"`"
+	echo "$wtg_process_pid" | while read -r p; do HIDE kill -9 "$p"; done
+	! wtg_check
+}
+
+wtg_check() {
+	out=1
+	wtg_process_count="`pgrep --full \"python $DATA_DIR/lib/gen.py\" | wc -l`"
+	if [ "$wtg_process_count" -gt '0' ]
+	then
+		out=0
+	fi
 	return $out
 }
 
-kalitorify_cmd() {
-	case "$1" in
-		'on'|'start') kalitorify_on;;
-		'off'|'stop') kalitorify_off;;
-		'restart') kalitorify_restart;;
-		*)
-			kalitorify_check
-			status="$?"
+# MACCHANGER
 
-			if [ "$status" -eq '0' ]
-			then
-				echo_success 'Kalitorify is active'
-			else
-				echo_warning 'Kalitorify is not active'
-			fi
-			return $status
-	esac
+macchanger_on() {
+
+	# Remove previous backup
+	[ -f "$DATA_DIR/backup/macchanger" ] && rm -f "$DATA_DIR/backup/macchanger"
+
+	interfaces="`ls -1 /sys/class/net | sed 's/lo//g'`"
+	echo "$interfaces" | while read -r iface; do
+		HIDE macchanger --random "$iface" && \
+		echo "$iface" >> "$DATA_DIR/backup/macchanger" && \
+		echo_success "Random MAC address set on $iface"
+	done
+
+	macchanger_check
+	status="$?"
+	if [ "$status" -ne '0' ]
+	then
+		echo_error 'Could not set a random MAC address to any interface'
+	fi
+	return $status
+}
+
+macchanger_off() {
+
+	# Restore interfaces MAC addresses
+	if [ -s "$DATA_DIR/backup/macchanger" ]
+	then
+		while IFS= read -r iface; do
+			HIDE macchanger --permanent "$iface" && \
+			echo_success "Restored permanent MAC address on $iface" || \
+			echo_error "Error restoring permanent MAC address on $iface"
+		done < "$DATA_DIR/backup/macchanger"
+	elif [ -f "$DATA_DIR/backup/macchanger" ] && [ ! -s "$DATA_DIR/backup/macchanger" ]
+	then
+		echo_error 'Macchanger backup found but empty, removing it'
+		rm -f "$DATA_DIR/backup/macchanger"
+	else
+		echo_error 'No macchanger backup found'
+	fi
+
+	macchanger_check
+	status="$?"
+	if [ "$status" -ne '0' ]
+	then
+		rm -rf "$DATA_DIR/backup/macchanger" && \
+		echo_success 'Removed macchanger backup'
+	fi
+
+	! macchanger_check
+	return $?
+}
+
+macchanger_check() {
+	out=0
+
+	if [ -s "$DATA_DIR/backup/macchanger" ]
+	then
+
+		# Check that each interface in the backup has a different MAC address than its static one
+		while IFS= read -r iface; do
+			current_mac="`macchanger --show $iface | grep 'Current MAC:' | awk '{print $3}'`"
+			permanent_mac="`macchanger --show $iface | grep 'Permanent MAC:' | awk '{print $3}'`"
+			[ "$current_mac" = "$permanent_mac" ] && out=1
+		done < "$DATA_DIR/backup/macchanger"
+	else
+		out=1
+	fi
+
+	return $out
 }
 
 main "$@"
