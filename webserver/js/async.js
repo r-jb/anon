@@ -13,20 +13,21 @@ function set_visuals_stopped(element) {
 }
 
 // Toggle modules or bundles of modules asynchronously
-async function toggle(html_element, script_element_type, script_element_value) {
+async function toggle(html_element) {
 	try {
-		const to_state = html_element.value;
-		const get_request = await fetch('php/toggle.php?type=' + script_element_type + '&value=' + script_element_value + '&state=' + to_state);
+		const module = html_element.id;
+		const option = html_element.value;
+		const get_request = await fetch('php/toggle.php?module=' + module + '&option=' + option);
 		const get_response = await get_request.text();
 
 		// Set button state accordingly
-		if (to_state === 'start') {
+		if (option === 'start') {
 			if (get_response === '0') set_visuals_running(html_element);
 			else {
 				alert('Error: module ' + script_element_value + ' did not start !')
 				set_visuals_stopped(html_element);
 			}
-		} else if (to_state === 'stop') {
+		} else if (option === 'stop') {
 			if (get_response === '0') set_visuals_stopped(html_element);
 			else {
 				alert('Error: module ' + script_element_value + ' did not stop !')
@@ -42,7 +43,8 @@ async function toggle(html_element, script_element_type, script_element_value) {
 // Check if a module/bundle is running
 async function check(html_element) {
 	try {
-		const get_request = await fetch('php/toggle.php?value=' + html_element.id);
+		const module = html_element.id;
+		const get_request = await fetch('php/toggle.php?module=' + module);
 		const get_response = await get_request.text();
 
 		// Set button state accordingly

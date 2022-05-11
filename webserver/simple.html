@@ -5,7 +5,7 @@
 <html lang='en'>
 
 	<head>
-		<title>Script Magic</title>
+		<title>Anon WebUI</title>
 		<link rel='shortcut icon' href='img/favicon.png'>
 		<link rel='stylesheet' href='css/style.css'>
 		<script src='js/async.js'></script>
@@ -15,21 +15,15 @@
 		<include-view src='header'>Loading header...</include-view>
 
 		<div class='element_off'>
-			<h2>Hostname</h2>
-			<p>This library script is a web package.</p>
-			<button id='hostname' onclick='toggle(this, "module", "hostname")' value='start'>Start</button>
+			<h2>Anonymize System</h2>
+			<p>Optimize the system's anonymity</p>
+			<button id='system' onclick='toggle(this)' value='system'>Start</button>
 		</div>
 
 		<div class='element_off'>
-			<h2>Web Fingerprinting</h2>
-			<p>This library script is....</p>
-			<button id='web_bundle' onclick='toggle(this, "bundle", "web")' value='start'>Start</button>
-		</div>
-
-		<div class='element_off'>
-			<h2>All</h2>
-			<p>This library script is....</p>
-			<button id='all_bundle' onclick='toggle(this, "bundle", "all")' value='start'>Start</button>
+			<h2>Anti-Forensics</h2>
+			<p>Create decoy files and web traffic</p>
+			<button id='decoy' onclick='toggle(this)' value='decoy'>Start</button>
 		</div>
 
 		<br><br><br>
