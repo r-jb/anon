@@ -20,24 +20,51 @@ echo_error() {
 	echo "${RED}[-] - ${@}${NOCOLOR}"
 }
 
+LOWER() {
+	echo "$@" | tr '[:upper:]' '[:lower:]' | tr -d ' '
+}
+
 cmd_exist() {
 	command -v "$1" >/dev/null 2>/dev/null
 	return $?
 }
 
+cmd_exist_or_update() {
+	out=1
+	cmd_exist "$1"
+	status="$?"
+
+	if [ "$status" -eq '0' ] && [ "$assume_yes" -ne '1' ]
+	then
+		echo -n "${BLUE}[?] - Do you want to update $1 [Y|n]: ${NOCOLOR}"
+		read confirm
+		case "`LOWER $confirm`" in
+			'n'|'no') out=0
+		esac
+	fi
+
+	return $out
+}
+
 install() {
+	assume_yes=0
+	case "`LOWER $1`" in
+		'-y'|'-yes') assume_yes=1
+	esac
 	sudo apt update -qq
-	cmd_exist anon || install_anon
-	cmd_exist kalitorify || install_kalitorify
+	cmd_exist_or_update anon || install_anon
+	cmd_exist_or_update kalitorify || install_kalitorify
 }
 
 install_package() {
 	echo_info "Installing $1"
-	apt install -y --no-install-recommends "$1" > /dev/null && \
+	sudo apt install -y --no-install-recommends "$1" > /dev/null && \
 	echo_success "Installed $1"
 }
 
 install_anon() {
+	tmp_path='/tmp/anon'
+
 	cmd_exist git || install_package git
 	cmd_exist php || install_package php
 	cmd_exist macchanger || install_package macchanger
@@ -45,7 +72,9 @@ install_anon() {
 	cmd_exist mat2 || install_package mat2
 
 	echo_info 'Installing anon'
-	sudo git clone -q https://github.com/r-jb/anon "$DATA_DIR/anon" && \
+	[ -e "$tmp_path" ] && sudo rm -rf "$tmp_path"
+	sudo git clone -q https://github.com/r-jb/anon.git "$tmp_path" && \
+	sudo rsync -rauh --delete "$tmp_path" "$DATA_DIR/anon" && \
 	sudo chmod +x "$DATA_DIR/anon/anon.sh" && \
 	sudo ln -sf "$DATA_DIR/anon/anon.sh" "$PROGRAM_DIR/anon"
 
@@ -63,14 +92,17 @@ install_anon() {
 }
 
 install_kalitorify() {
+	tmp_path='/tmp/kalitorify'
+
 	cmd_exist git || install_package git
+
 	echo_info 'Installing Kalitorify'
-	[ -e "/tmp/kalitorify" ] && sudo rm -rf "/tmp/kalitorify"
+	[ -e "$tmp_path" ] && sudo rm -rf "$tmp_path"
 	sudo apt install -y --no-install-recommends tor curl git make && \
-	sudo git clone -q https://github.com/brainfucksec/kalitorify "/tmp/kalitorify" && \
-	cd "/tmp/kalitorify" && \
+	sudo git clone -q https://github.com/brainfucksec/kalitorify.git "$tmp_path" && \
+	cd "$tmp_path" && \
 	sudo make install && \
-	sudo rm -rf "/tmp/kalitorify" && \
+	sudo rm -rf "$tmp_path" && \
 	echo_success 'Installed Kalitorify'
 }
 
@@ -84,4 +116,4 @@ install_web_traffic_generator() {
 	echo_success 'Installed web-traffic-generator'
 }
 
-install
+install "$@"
