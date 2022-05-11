@@ -55,17 +55,17 @@ info() {
 }
 
 usage() {
-	echo "Usage: anon <module> <start|stop>\n"
+	echo "Usage: anon <module> <option>\n"
 	echo "Currently supported modules are:
 	${BLUE}info${NOCOLOR} - Print system informations
-	${BLUE}clean${NOCOLOR} - Clean dangerous files/apps
-	${BLUE}shred${NOCOLOR} - Shred documents securely
-	${BLUE}webui${NOCOLOR} - Web interface for the anon script
-	${BLUE}timezone${NOCOLOR} - Change the timezone to UTC
-	${BLUE}hostname${NOCOLOR} - Randomize the hostname
-	${BLUE}kalitorify${NOCOLOR} - Utility to run TOR as a system proxy
-	${BLUE}wtg${NOCOLOR} - Fake web traffic generator
-	${BLUE}macchanger${NOCOLOR} - Changes the MAC address of every interface
+	${BLUE}clean${NOCOLOR} - Clean dangerous files/apps to prevent leaks
+	${BLUE}shred${NOCOLOR} <${ORANGE}path to file|directory${NOCOLOR}> - Shred documents securely
+	${BLUE}webui${NOCOLOR} <${GREEN}start${NOCOLOR}|${RED}stop${NOCOLOR}> - Web interface for the anon script
+	${BLUE}timezone${NOCOLOR} <${GREEN}start${NOCOLOR}|${RED}stop${NOCOLOR}> - Change the timezone to UTC
+	${BLUE}hostname${NOCOLOR} <${GREEN}start${NOCOLOR}|${RED}stop${NOCOLOR}> - Randomize the hostname
+	${BLUE}kalitorify${NOCOLOR} <${GREEN}start${NOCOLOR}|${RED}stop${NOCOLOR}> - Utility to run TOR as a system proxy
+	${BLUE}wtg${NOCOLOR} <${GREEN}start${NOCOLOR}|${RED}stop${NOCOLOR}> - Fake web traffic generator
+	${BLUE}macchanger${NOCOLOR} <${GREEN}start${NOCOLOR}|${RED}stop${NOCOLOR}> - Changes the MAC address of every interface
 	"
 }
 
@@ -130,7 +130,7 @@ main() {
 			esac
 			;;
 
-		'info'|'clean'|'shred') $cmd "$3";;
+		'info'|'clean'|'shred') $module "$cmd";;
 
 		*) usage
 	esac
@@ -153,19 +153,20 @@ info() {
 clean() {
 
 	# Kill some network app that can have sensitive data
-	killall -q chrome dropbox skype icedove thunderbird firefox firefox-esr chromium xchat hexchat transmission steam firejail /usr/lib/firefox/firefox librewolf
+	HIDE killall -q chrome dropbox skype icedove thunderbird firefox firefox-esr chromium xchat hexchat transmission steam firejail librewolf
 	echo_success 'Dangerous applications killed'
 
 	bleachbit --list-cleaners | \
 	while read option
 	do
-		test "${option#*history}" != "$option" && \
-		test "${option#*cache}" != "$option" && \
-		test "${option#*current_session}" != "$option" && \
-		test "${option#*flash}" != "$option" && \
-		HIDE bleachbit --clean "$option"
+		{
+			test "${option#*history}" != "$option" || \
+			test "${option#*cache}" != "$option" || \
+			test "${option#*current_session}" != "$option" || \
+			test "${option#*flash}" != "$option"
+		} && HIDE bleachbit --clean "$option"
 	done
-	echo_success 'Cache cleaned'
+	echo_success 'Cache and history cleaned'
 }
 
 # SHRED FILES
@@ -174,12 +175,22 @@ shred() {
 	out=1
 	to_shred="$1"
 
-	bleachbit --clean "$to_shred" && \
-	[ ! -e "$to_shred" ] && \
-	{
-		out=0
-		echo_success 'File securely deleted'
-	} || echo_error 'Could not securely delete the files provided'
+	if [ -z "$to_shred" ]
+	then
+		echo_error 'Please provide a file/directory to shred'
+	else
+		if [ ! -e "$to_shred" ]
+		then
+			echo_error 'The file/directory provided does not exist'
+		else
+			HIDE bleachbit --shred "$to_shred" && \
+			[ ! -e "$to_shred" ] && \
+			{
+				out=0
+				echo_success 'File securely deleted'
+			} || echo_error 'Could not securely delete the files provided'
+		fi
+	fi
 
 	return $out
 }
