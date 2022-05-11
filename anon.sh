@@ -40,20 +40,6 @@ check_root() {
 	fi
 }
 
-info() {
-	echo "Hostname:\t`hostname`\n"
-
-	echo 'Mac address:'
-	for iface in "/sys/class/net/"*
-	do
-		iface_name="`basename $iface`"
-		[ "$iface_name" != 'lo' ] && echo "\t\t$iface_name: `cat $iface/address`"
-	done
-	echo
-
-	echo "IP address:\t`curl -s https://check.torproject.org | grep 'Your IP address appears to be:' | cut -d '>' -f 3 | cut -f 1 -d '<'`\n"
-}
-
 usage() {
 	echo "Usage: anon <module> (<options>)\n"
 	echo "Currently supported modules are:
@@ -90,7 +76,7 @@ main() {
 					if [ "$status" -eq '0' ] && [ "$module" != 'wtg' ]
 					then
 						echo_error "Module $module is already started"
-						exit 1
+						status=1
 					else
 						echo_info "Starting module $module"
 						${module}_on
@@ -98,8 +84,9 @@ main() {
 						[ "$status" -eq '0' ] && \
 						echo_success "Started module $module" || \
 						echo_error "Error starting module $module"
-						return $status
 					fi
+
+					return $status
 					;;
 
 				'stop')
@@ -114,11 +101,11 @@ main() {
 						[ "$status" -eq '0' ] && \
 						echo_success "Stopped module $module" || \
 						echo_error "Error stopping module $module"
-						return $status
 					else
 						echo_error "Module $module is already stopped"
-						exit 1
 					fi
+
+					return $status
 					;;
 
 				'')
@@ -206,9 +193,10 @@ shred() {
 # METADATA
 
 mat() {
+	out=1
 	option_or_file="$1"
 	file="$2"
-	out=1
+	filename="`basename $file`"
 
 	case "`LOWER $option_or_file`" in
 		'rm'|'remove')
@@ -219,10 +207,19 @@ mat() {
 			then
 				echo_error 'File not found'
 			else
-				echo_info "Removing metadata of `basename $file`:"
-				mat2 "$file" && \
-				out=0 || \
-				echo_error "Error while removing metadata of `basename $file`"
+				echo_info "Removing metadata of $filename:"
+				mat2 "$file"
+				status="$?"
+
+				if [ "$status" -eq '0' ]
+				then
+					out=0
+					extension="${filename##*.}"
+					filename_without_extension="${filename%.*}"
+					echo_success "Cleaned file: $filename_without_extension.cleaned.$extension"
+				else
+					echo_error "Error while removing metadata of `basename $file`"
+				fi
 			fi
 			;;
 
@@ -305,6 +302,7 @@ timezone_on() {
 }
 
 timezone_off() {
+	out=1
 
 	# Restore timezone settings
 	if [ -s "$DATA_DIR/backup/timezone" ]
@@ -327,7 +325,9 @@ timezone_off() {
 		echo_error 'No timezone backup found'
 	fi
 
-	timezone_check
+	timezone_check || out=0
+
+	return $out
 }
 
 timezone_check() {
