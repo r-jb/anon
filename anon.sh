@@ -55,17 +55,18 @@ info() {
 }
 
 usage() {
-	echo "Usage: anon <module> <option>\n"
+	echo "Usage: anon <module> (<options>)\n"
 	echo "Currently supported modules are:
 	${BLUE}info${NOCOLOR} - Print system informations
 	${BLUE}clean${NOCOLOR} - Clean dangerous files/apps to prevent leaks
-	${BLUE}shred${NOCOLOR} <${ORANGE}path to file|directory${NOCOLOR}> - Shred documents securely
+	${BLUE}shred${NOCOLOR} <${ORANGE}path to file/directory${NOCOLOR}> - Delete documents securely
+	${BLUE}mat${NOCOLOR} <${ORANGE}path to file${NOCOLOR}|${GREEN}rm${NOCOLOR} <${ORANGE}path to file${NOCOLOR}>> - Show metadata or remove them
 	${BLUE}webui${NOCOLOR} <${GREEN}start${NOCOLOR}|${RED}stop${NOCOLOR}> - Web interface for the anon script
-	${BLUE}timezone${NOCOLOR} <${GREEN}start${NOCOLOR}|${RED}stop${NOCOLOR}> - Change the timezone to UTC
+	${BLUE}timezone${NOCOLOR} <${GREEN}start${NOCOLOR}|${RED}stop${NOCOLOR}> - Prevent time related leaks
 	${BLUE}hostname${NOCOLOR} <${GREEN}start${NOCOLOR}|${RED}stop${NOCOLOR}> - Randomize the hostname
 	${BLUE}kalitorify${NOCOLOR} <${GREEN}start${NOCOLOR}|${RED}stop${NOCOLOR}> - Utility to run TOR as a system proxy
-	${BLUE}wtg${NOCOLOR} <${GREEN}start${NOCOLOR}|${RED}stop${NOCOLOR}> - Fake web traffic generator
-	${BLUE}macchanger${NOCOLOR} <${GREEN}start${NOCOLOR}|${RED}stop${NOCOLOR}> - Changes the MAC address of every interface
+	${BLUE}wtg${NOCOLOR} <${GREEN}start${NOCOLOR}|${RED}stop${NOCOLOR}> - Generate fake web traffic
+	${BLUE}macchanger${NOCOLOR} <${GREEN}start${NOCOLOR}|${RED}stop${NOCOLOR}> - Randomize the MAC address of every interface
 	"
 }
 
@@ -74,12 +75,12 @@ main() {
 	[ ! -d "$DATA_DIR/backup" ] && mkdir "$DATA_DIR/backup"
 
 	module="`LOWER $1`"
-	cmd="`LOWER $2`"
+	option="`LOWER $2`"
 
 	case "$module" in
-		'webui'|'timezone'|'hostname'|'kalitorify'|'wtg'|'macchanger')
+		'webui'|'timezone'|'hostname'|'kalitorify'|'wtg'|'macchanger'|'system'|'decoy')
 
-			case "$cmd" in
+			case "$option" in
 
 				'start')
 					${module}_check
@@ -92,9 +93,12 @@ main() {
 						exit 1
 					else
 						echo_info "Starting module $module"
-						${module}_on && \
+						${module}_on
+						status="$?"
+						[ "$status" -eq '0' ] && \
 						echo_success "Started module $module" || \
 						echo_error "Error starting module $module"
+						return $status
 					fi
 					;;
 
@@ -105,9 +109,12 @@ main() {
 					if [ "$status" -eq '0' ]
 					then
 						echo_info "Stopping module $module"
-						${module}_off && \
-						echo_success "Stopping module $module" || \
+						${module}_off
+						status="$?"
+						[ "$status" -eq '0' ] && \
+						echo_success "Stopped module $module" || \
 						echo_error "Error stopping module $module"
+						return $status
 					else
 						echo_error "Module $module is already stopped"
 						exit 1
@@ -118,19 +125,20 @@ main() {
 					${module}_check
 					status="$?"
 
-					if [ "$status" -eq '0' ]
-					then
-						echo_success "Module $module is active"
-					else
-						echo_warning "Module $module is not active"
-					fi
+					[ "$status" -eq '0' ] && \
+					echo_success "Module $module is active" || \
+					echo_warning "Module $module is not active"
+					return $status
 					;;
 
 				*) usage
 			esac
 			;;
 
-		'info'|'clean'|'shred') $module "$cmd";;
+		'info'|'clean'|'shred'|'mat')
+			shift 1
+			$module "$@"
+			;;
 
 		*) usage
 	esac
@@ -181,7 +189,7 @@ shred() {
 	else
 		if [ ! -e "$to_shred" ]
 		then
-			echo_error 'The file/directory provided does not exist'
+			echo_error 'File/Directory not found'
 		else
 			HIDE bleachbit --shred "$to_shred" && \
 			[ ! -e "$to_shred" ] && \
@@ -191,6 +199,47 @@ shred() {
 			} || echo_error 'Could not securely delete the files provided'
 		fi
 	fi
+
+	return $out
+}
+
+# METADATA
+
+mat() {
+	option_or_file="$1"
+	file="$2"
+	out=1
+
+	case "`LOWER $option_or_file`" in
+		'rm'|'remove')
+			if [ -z "$file" ]
+			then
+				usage
+			elif [ ! -f "$file" ]
+			then
+				echo_error 'File not found'
+			else
+				echo_info "Removing metadata of `basename $file`:"
+				mat2 "$file" && \
+				out=0 || \
+				echo_error "Error while removing metadata of `basename $file`"
+			fi
+			;;
+
+		*)
+			if [ -z "$option_or_file" ]
+			then
+				usage
+			elif [ ! -f "$option_or_file" ]
+			then
+				echo_error 'File not found'
+			else
+				echo_info "Metadata of `basename $option_or_file`:"
+				mat2 -s "$option_or_file" && \
+				out=0 || \
+				echo_error "Error while reading metadata of `basename $option_or_file`"
+			fi
+	esac
 
 	return $out
 }
@@ -244,10 +293,10 @@ timezone_on() {
 	[ -f "$DATA_DIR/backup/timezone" ] && rm -f "$DATA_DIR/backup/timezone"
 
 	# Backup iptable rules
-	echo_info 'Creating backup'
+	echo_info 'Creating time settings backup'
 	timedatectl show --property=Timezone --property=NTP > "$DATA_DIR/backup/timezone" && \
-	echo_success 'Backed up timezone' || \
-	{ echo_error 'Error backing timezone, exiting'; exit 1; }
+	echo_success 'Backed up time settings' || \
+	{ echo_error 'Error backing time settings, exiting'; exit 1; }
 
 	timedatectl set-ntp on && echo_success 'NTP activated'
 	timedatectl set-timezone 'Etc/UTC' && echo_success 'Timezone set to UTC'
@@ -260,7 +309,6 @@ timezone_off() {
 	# Restore timezone settings
 	if [ -s "$DATA_DIR/backup/timezone" ]
 	then
-		echo_info 'Restoring timezone'
 
 		# Exporting the values from the backup
 		while IFS== read -r key value; do
@@ -270,7 +318,7 @@ timezone_off() {
 		{ timedatectl set-ntp "$NTP" && echo_success 'NTP state restored' || { echo_error 'Error restoring NTP setting, exiting'; exit 1; } } && \
 		{ timedatectl set-timezone "$Timezone" && echo_success "Timezone restored to $Timezone" || { echo_error 'Error restoring timezone, exiting'; exit 1; } } && \
 		rm -f "$DATA_DIR/backup/timezone" && \
-		echo_success 'Removed backup'
+		echo_success 'Removed time settings backup'
 	elif [ -f "$DATA_DIR/backup/timezone" ] && [ ! -s "$DATA_DIR/backup/timezone" ]
 	then
 		echo_error 'Timezone backup found but empty, removing it'
@@ -279,7 +327,7 @@ timezone_off() {
 		echo_error 'No timezone backup found'
 	fi
 
-	! timezone_check
+	timezone_check
 }
 
 timezone_check() {
@@ -455,6 +503,77 @@ macchanger_check() {
 	else
 		out=1
 	fi
+
+	return $out
+}
+
+# BUNDLE SYSTEM
+
+system_on() {
+	error=0
+	set 'hostname' 'macchanger' 'timezone' 'kalitorify'
+
+	for m in "$@"
+	do
+		if [ "$error" -eq '0' ]
+		then
+			${m}_check || \
+			{
+				${m}_on || error=1
+			}
+		else
+			system_off
+		fi
+	done
+
+	system_check
+	status="$?"
+	if [ "$status" -ne '0' ]
+	then
+		echo_error 'Error enabling all modules'
+	fi
+	return $status
+}
+
+system_off() {
+	set 'hostname' 'macchanger' 'timezone' 'kalitorify'
+
+	for m in "$@"
+	do
+		${m}_check && ${m}_off
+	done
+
+	system_check_off
+	status="$?"
+	if [ "$status" -ne '0' ]
+	then
+		echo_error 'Error enabling all modules'
+	fi
+	return $status
+}
+
+# Returns true if all the system modules are active
+system_check() {
+	out=1
+
+	hostname_check && \
+	macchanger_check && \
+	timezone_check && \
+	kalitorify_check && \
+	out=0
+
+	return $out
+}
+
+# Returns true if all the system modules are inactive
+system_check_off() {
+	out=1
+
+	! hostname_check && \
+	! macchanger_check && \
+	! timezone_check && \
+	! kalitorify_check && \
+	out=0
 
 	return $out
 }

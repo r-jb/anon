@@ -42,6 +42,7 @@ install_anon() {
 	cmd_exist php || install_package php
 	cmd_exist macchanger || install_package macchanger
 	cmd_exist bleachbit || install_package bleachbit
+	cmd_exist mat2 || install_package mat2
 
 	echo_info 'Installing anon'
 	sudo git clone -q https://github.com/r-jb/anon "$DATA_DIR/anon" && \
