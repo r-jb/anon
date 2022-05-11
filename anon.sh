@@ -55,8 +55,11 @@ info() {
 }
 
 usage() {
-	echo "Usage: `basename $0` <module> <start|stop>\n"
+	echo "Usage: anon <module> <start|stop>\n"
 	echo "Currently supported modules are:
+	${BLUE}info${NOCOLOR} - Print system informations
+	${BLUE}clean${NOCOLOR} - Clean dangerous files/apps
+	${BLUE}shred${NOCOLOR} - Shred documents securely
 	${BLUE}webui${NOCOLOR} - Web interface for the anon script
 	${BLUE}timezone${NOCOLOR} - Change the timezone to UTC
 	${BLUE}hostname${NOCOLOR} - Randomize the hostname
@@ -111,11 +114,6 @@ main() {
 					fi
 					;;
 
-				'info')
-					echo "Hostname: `hostname`"
-					echo "IP address: `hostname`"
-					;;
-
 				'')
 					${module}_check
 					status="$?"
@@ -132,11 +130,59 @@ main() {
 			esac
 			;;
 
+		'info'|'clean'|'shred') $cmd "$3";;
+
 		*) usage
 	esac
 }
 
 ###################### Modules
+
+# INFORMATIONS
+
+info() {
+	echo "Hostname: `hostname`"
+	echo "Timezone: `timedatectl show --property=Timezone --value`"
+	echo "IP address: "`curl -s https://check.torproject.org | grep 'Your IP address appears to be:' | cut -f 3 -d '>' | cut -f 1 -d '<'`""
+	interfaces="`ls -1 /sys/class/net | sed 's/lo//g'`"
+	echo -n "$interfaces\n" | while IFS= read -r iface; do echo -n "MAC address on $iface: "; macchanger --show "$iface"  | grep 'Current MAC:' | awk '{print $3}'; done
+}
+
+# CLEAN DANGEROUS APPS/FILES
+
+clean() {
+
+	# Kill some network app that can have sensitive data
+	killall -q chrome dropbox skype icedove thunderbird firefox firefox-esr chromium xchat hexchat transmission steam firejail /usr/lib/firefox/firefox librewolf
+	echo_success 'Dangerous applications killed'
+
+	bleachbit --list-cleaners | \
+	while read option
+	do
+		test "${option#*history}" != "$option" && \
+		test "${option#*cache}" != "$option" && \
+		test "${option#*current_session}" != "$option" && \
+		test "${option#*flash}" != "$option" && \
+		HIDE bleachbit --clean "$option"
+	done
+	echo_success 'Cache cleaned'
+}
+
+# SHRED FILES
+
+shred() {
+	out=1
+	to_shred="$1"
+
+	bleachbit --clean "$to_shred" && \
+	[ ! -e "$to_shred" ] && \
+	{
+		out=0
+		echo_success 'File securely deleted'
+	} || echo_error 'Could not securely delete the files provided'
+
+	return $out
+}
 
 # WEB UI
 
@@ -159,7 +205,7 @@ webui_off() {
 	trap - 2
 
 	# Kill the webserver if running
-	webui_check && HIDE killall php
+	webui_check && killall -q php
 
 	# Remove the lock
 	rm -f '/tmp/.lock_webui' && \
