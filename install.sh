@@ -54,6 +54,8 @@ install() {
 	sudo apt update -qq
 	cmd_exist_or_update anon || install_anon
 	cmd_exist_or_update kalitorify || install_kalitorify
+
+	cmd_exist anon && echo_success 'All good !' && echo_info 'Type anon to start'
 }
 
 install_package() {
@@ -120,6 +122,7 @@ install_web_traffic_generator() {
 install_librewolf() {
 	cmd_exist docker || install_package docker.io
 	sudo systemctl start docker && \
+	echo_success 'Building hardened librewolf'
 	sudo docker build --no-cache --pull --quiet --tag librewolf "$DATA_DIR/anon/lib/librewolf" && \
 	echo_success 'Installed hardened librewolf'
 }
