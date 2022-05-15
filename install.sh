@@ -74,7 +74,7 @@ install_anon() {
 	echo_info 'Installing anon'
 	[ -e "$tmp_path" ] && sudo rm -rf "$tmp_path"
 	sudo git clone -q https://github.com/r-jb/anon.git "$tmp_path" && \
-	sudo rsync -rauh --delete --exclude "$DATA_DIR/anon/lib/librewolf/profile" "$tmp_path" "$DATA_DIR/anon" && \
+	sudo rsync -rauh --delete --exclude "$DATA_DIR/anon/lib/librewolf/profile" "$tmp_path" "$DATA_DIR" && \
 	sudo chmod +x "$DATA_DIR/anon/anon.sh" && \
 	sudo ln -sf "$DATA_DIR/anon/anon.sh" "$PROGRAM_DIR/anon"
 
