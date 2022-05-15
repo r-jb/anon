@@ -5,9 +5,18 @@
 ## Install
 Copy and paste this in your terminal for a quick install.
 
-`curl -fsSL https://github.com/r-jb/anon/raw/main/install.sh | sh`
+`$ curl -fsSL https://github.com/r-jb/anon/raw/main/install.sh | sh`
 
 ## Usage
 
+### Show usage
+`$ sudo anon webui start`
+
 ### Start the webui module
-`sudo anon webui start`
+`$ sudo anon webui start`
+
+### Stop the webui module
+`$ sudo anon webui stop`
+
+### Check the webui status
+`$ sudo anon webui`
