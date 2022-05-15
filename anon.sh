@@ -48,11 +48,13 @@ usage() {
 	${BLUE}shred${NOCOLOR} <${ORANGE}path to file/directory${NOCOLOR}> - Delete documents securely
 	${BLUE}mat${NOCOLOR} <${ORANGE}path to file${NOCOLOR}|${GREEN}rm${NOCOLOR} <${ORANGE}path to file${NOCOLOR}>> - Show metadata or remove them
 	${BLUE}webui${NOCOLOR} <${GREEN}start${NOCOLOR}|${RED}stop${NOCOLOR}> - Web interface for the anon script
-	${BLUE}timezone${NOCOLOR} <${GREEN}start${NOCOLOR}|${RED}stop${NOCOLOR}> - Prevent time related leaks
+	${BLUE}time${NOCOLOR} <${GREEN}start${NOCOLOR}|${RED}stop${NOCOLOR}> - Prevent time related leaks
 	${BLUE}hostname${NOCOLOR} <${GREEN}start${NOCOLOR}|${RED}stop${NOCOLOR}> - Randomize the hostname
 	${BLUE}kalitorify${NOCOLOR} <${GREEN}start${NOCOLOR}|${RED}stop${NOCOLOR}> - Utility to run TOR as a system proxy
 	${BLUE}wtg${NOCOLOR} <${GREEN}start${NOCOLOR}|${RED}stop${NOCOLOR}> - Generate fake web traffic
 	${BLUE}macchanger${NOCOLOR} <${GREEN}start${NOCOLOR}|${RED}stop${NOCOLOR}> - Randomize the MAC address of every interface
+	${BLUE}hosts${NOCOLOR} <${GREEN}start${NOCOLOR}|${RED}stop${NOCOLOR}> - Blocks tracking, ads, dangerous domains
+	${BLUE}librewolf${NOCOLOR} - Anti-tracking configured browser
 	"
 }
 
@@ -64,7 +66,7 @@ main() {
 	option="`LOWER $2`"
 
 	case "$module" in
-		'webui'|'timezone'|'hostname'|'kalitorify'|'wtg'|'macchanger'|'system'|'decoy')
+		'webui'|'time'|'hostname'|'kalitorify'|'wtg'|'macchanger'|'hosts'|'system'|'decoy')
 
 			case "$option" in
 
@@ -122,7 +124,7 @@ main() {
 			esac
 			;;
 
-		'info'|'clean'|'shred'|'mat')
+		'info'|'clean'|'shred'|'mat'|'librewolf')
 			shift 1
 			$module "$@"
 			;;
@@ -138,7 +140,7 @@ main() {
 info() {
 	echo "Hostname: `hostname`"
 	echo "Timezone: `timedatectl show --property=Timezone --value`"
-	echo "IP address: "`curl -s https://check.torproject.org | grep 'Your IP address appears to be:' | cut -f 3 -d '>' | cut -f 1 -d '<'`""
+	echo "IP address: `curl -s https://check.torproject.org | grep 'Your IP address appears to be:' | cut -f 3 -d '>' | cut -f 1 -d '<'`"
 	interfaces="`ls -1 /sys/class/net | sed 's/lo//g'`"
 	echo -n "$interfaces\n" | while IFS= read -r iface; do echo -n "MAC address on $iface: "; macchanger --show "$iface"  | grep 'Current MAC:' | awk '{print $3}'; done
 }
@@ -244,52 +246,44 @@ mat() {
 # WEB UI
 
 webui_on() {
-	if [ ! -f '/tmp/.lock_webui' ]
-	then
-		echo 1 > '.lock_webui'
-		trap 'webui_off' 2
-		echo_info 'Please go to http://localhost'
-		echo_info 'Web server running, press Ctrl+C to stop it...'
-		HIDE php -S localhost:80 -t "$DATA_DIR/webserver"
-	else
-		echo_error 'Web server is already running'
-	fi
+
+	# Redirect Ctrl+C to webui_off()
+	trap 'webui_off' 2
+
+	echo_info 'Please go to http://localhost:8000'
+	echo_info 'Web server running, press Ctrl+C to stop it...'
+	HIDE php -S localhost:8000 -t "$DATA_DIR/webserver"
+	echo
 }
 
 webui_off() {
 
-	# Release trap
+	# Release Ctrl+C
 	trap - 2
 
 	# Kill the webserver if running
-	webui_check && killall -q php
-
-	# Remove the lock
-	rm -f '/tmp/.lock_webui' && \
-	{ echo; echo_success 'Stopped web server'; }
-
-	# Exit code 2
-	exit 2
+	webui_check && \
+	{
+		webui_process_pid="`pgrep --full \"php -S localhost:8000 -t $DATA_DIR/webserver\"`"
+		HIDE kill -9 "$webui_process_pid"
+	}
 }
 
 webui_check() {
 	out=1
-	php_processes="$((`ps auxww | grep 'php -S localhost:80' | wc | awk '{print $1}'` - 1))"
-	if [ "$php_processes" -gt "0" ]
+	webui_process_pid="`pgrep --full \"php -S localhost:8000 -t $DATA_DIR/webserver\"`"
+	if [ ! -z "$webui_process_pid" ]
 	then
 		out=0
 	fi
 	return $out
 }
 
-# TIMEZONE
+# TIME
 
-timezone_on() {
+time_on() {
 
-	# Remove previous backup
-	[ -f "$DATA_DIR/backup/timezone" ] && rm -f "$DATA_DIR/backup/timezone"
-
-	# Backup iptable rules
+	# Backup time settings
 	echo_info 'Creating time settings backup'
 	timedatectl show --property=Timezone --property=NTP > "$DATA_DIR/backup/timezone" && \
 	echo_success 'Backed up time settings' || \
@@ -297,11 +291,12 @@ timezone_on() {
 
 	timedatectl set-ntp on && echo_success 'NTP activated'
 	timedatectl set-timezone 'Etc/UTC' && echo_success 'Timezone set to UTC'
+	HIDE sysctl -w net.ipv4.tcp_timestamps=0 && echo_success 'Disabled TCP timestamps'
 
-	timezone_check
+	time_check
 }
 
-timezone_off() {
+time_off() {
 	out=1
 
 	# Restore timezone settings
@@ -314,27 +309,30 @@ timezone_off() {
 		done < "$DATA_DIR/backup/timezone"
 
 		{ timedatectl set-ntp "$NTP" && echo_success 'NTP state restored' || { echo_error 'Error restoring NTP setting, exiting'; exit 1; } } && \
-		{ timedatectl set-timezone "$Timezone" && echo_success "Timezone restored to $Timezone" || { echo_error 'Error restoring timezone, exiting'; exit 1; } } && \
+		{ timedatectl set-timezone "$Timezone" && echo_success "Time zone restored to $Timezone" || { echo_error 'Error restoring timezone, exiting'; exit 1; } } && \
 		rm -f "$DATA_DIR/backup/timezone" && \
 		echo_success 'Removed time settings backup'
 	elif [ -f "$DATA_DIR/backup/timezone" ] && [ ! -s "$DATA_DIR/backup/timezone" ]
 	then
-		echo_error 'Timezone backup found but empty, removing it'
+		echo_error 'Time zone backup found but empty, removing it'
 		rm -f "$DATA_DIR/backup/timezone"
 	else
-		echo_error 'No timezone backup found'
+		echo_error 'No time zone backup found'
 	fi
 
-	timezone_check || out=0
+	HIDE sysctl -w net.ipv4.tcp_timestamps=1 && echo_success 'Enabled TCP timestamps'
+
+	! time_check && out=0
 
 	return $out
 }
 
-timezone_check() {
+time_check() {
 	out=1
 	current_timezone="`timedatectl show --property=Timezone --value`"
 	current_ntp_status="`timedatectl show --property=NTP --value`"
-	if [ "$current_timezone" = 'Etc/UTC' ] && [ "$current_ntp_status" = 'yes' ]
+	tcp_timestamps_status="`sysctl net.ipv4.tcp_timestamps`"
+	if [ "$current_timezone" = 'Etc/UTC' ] && [ "$current_ntp_status" = 'yes' ] && [ "$tcp_timestamps_status" = 'net.ipv4.tcp_timestamps = 0' ]
 	then
 		out=0
 	fi
@@ -351,6 +349,7 @@ hostname_on() {
 }
 
 hostname_off() {
+
 	# Reset the transcient hostname to the static hostname
 	current_hostname="`hostnamectl status --transient | tr -d ' '`"
 	static_hostname="`hostnamectl status --static | tr -d ' '`"
@@ -373,23 +372,22 @@ hostname_check() {
 
 kalitorify_on() {
 
-	# Remove previous backup
-	[ -f "$DATA_DIR/backup/iptables" ] && rm -f "$DATA_DIR/backup/iptables"
-
 	# Backup iptable rules
 	echo_info 'Creating backup'
 	iptables-save > "$DATA_DIR/backup/iptables" && \
 	echo_success 'Backed up iptables rules' || \
 	{ echo_error 'Error backing iptables rules, exiting'; exit 1; }
 
-	kalitorify --tor
+	echo_info 'Starting Kalitorify'
+	HIDE kalitorify --tor
+	return $?
 }
 
 kalitorify_off() {
-	kalitorify --clearnet
+	HIDE kalitorify --clearnet
 	status="$?"
 
-	# Restore iptable rules
+	# Restore iptables rules
 	if [ -s "$DATA_DIR/backup/iptables" ]
 	then
 		echo_info 'Restoring iptables rules'
@@ -408,8 +406,9 @@ kalitorify_off() {
 }
 
 kalitorify_check() {
-	HIDE kalitorify --status
-	return $?
+	out=1
+	curl -s https://check.torproject.org | HIDE grep 'Congratulations. This browser is configured to use Tor.' && out=0
+	return $out
 }
 
 # WEB-TRAFFIC-GENERATOR
@@ -442,7 +441,7 @@ macchanger_on() {
 	# Remove previous backup
 	[ -f "$DATA_DIR/backup/macchanger" ] && rm -f "$DATA_DIR/backup/macchanger"
 
-	interfaces="`ls -1 /sys/class/net | sed 's/lo//g'`"
+	interfaces="`ls -1 /sys/class/net | sed 's/lo//g' | sed 's/docker0//g'`"
 	echo "$interfaces" | while read -r iface; do
 		HIDE macchanger --random "$iface" && \
 		echo "$iface" >> "$DATA_DIR/backup/macchanger" && \
@@ -507,11 +506,85 @@ macchanger_check() {
 	return $out
 }
 
+# HOSTS FILE BLOCKING
+
+hosts_on() {
+	set 'https://hosts.oisd.nl' 'https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts'
+
+	tmp_work_dir='/tmp/anon/hosts'
+	rm -rf "$tmp_work_dir"
+	mkdir -p "$tmp_work_dir"
+
+	if [ -s '/etc/hosts.bak' ]
+	then
+		echo_error 'A hosts backup already exists'
+	else
+		count=0
+		for url in "$@"; do
+			[ ! -z "$url" ] && \
+			echo_info "Downloading $url" && \
+			curl -sS "$url" >> "$tmp_work_dir/merge" && \
+			count=$((count + 1)) && \
+			echo_success "Downloaded"
+		done
+
+		if [ "$count" -le '0' ]
+		then
+			echo_error 'No sources could be downloaded'
+		else
+
+			# Put current hosts file at the top of new hosts file
+			cp '/etc/hosts' "$tmp_work_dir/new_hosts"
+
+			# Add indicator
+			echo "\n\n### HOSTS BLOCKING STARTING HERE ###\n" >> "$tmp_work_dir/new_hosts"
+
+			# Sort uniq entries
+			sort "$tmp_work_dir/merge" | uniq | sed '/^[[:blank:]]*#/d;s/#.*//' | sed '/^[[:blank:]]*127.0.0.1/d;s/127.0.0.1.*//' >> "$tmp_work_dir/new_hosts"
+
+			# Create current hosts backup and apply new hosts
+			mv '/etc/hosts' '/etc/hosts.bak' && \
+			mv "$tmp_work_dir/new_hosts" '/etc/hosts' && \
+			rm -rf "$tmp_work_dir"
+		fi
+	fi
+
+	hosts_check
+	return $?
+}
+
+hosts_off() {
+	out=1
+
+	if [ -f '/etc/hosts.bak' ] && [ ! -s '/etc/hosts.bak' ]
+	then
+		echo_error 'Hosts backup found but empty, removing it'
+		rm -f '/etc/hosts.bak'
+	elif [ -s '/etc/hosts.bak' ]
+	then
+		mv '/etc/hosts.bak' '/etc/hosts' && \
+		out=0
+	fi
+
+	return $out
+}
+
+hosts_check() {
+	out=1
+
+	if [ -s '/etc/hosts' ] && [ -s '/etc/hosts.bak' ]
+	then
+		out=0
+	fi
+
+	return $out
+}
+
 # BUNDLE SYSTEM
 
 system_on() {
 	error=0
-	set 'hostname' 'macchanger' 'timezone' 'kalitorify'
+	set 'hostname' 'macchanger' 'time' 'kalitorify'
 
 	for m in "$@"
 	do
@@ -536,7 +609,7 @@ system_on() {
 }
 
 system_off() {
-	set 'hostname' 'macchanger' 'timezone' 'kalitorify'
+	set 'hostname' 'macchanger' 'time' 'kalitorify'
 
 	for m in "$@"
 	do
@@ -558,7 +631,7 @@ system_check() {
 
 	hostname_check && \
 	macchanger_check && \
-	timezone_check && \
+	time_check && \
 	kalitorify_check && \
 	out=0
 
@@ -571,11 +644,33 @@ system_check_off() {
 
 	! hostname_check && \
 	! macchanger_check && \
-	! timezone_check && \
+	! time_check && \
 	! kalitorify_check && \
 	out=0
 
 	return $out
+}
+
+# Librewolf
+
+librewolf() {
+	container_profile_path='/root/.librewolf/anon'
+
+	echo_info 'Browser download directory: /tmp/Downloads'
+
+	HIDE xhost +
+	HIDE docker run \
+	-v /tmp/.X11-unix:/tmp/.X11-unix \
+	-v /dev/snd:/dev/snd \
+	-v /dev/shm:/dev/shm \
+	-v /etc/machine-id:/etc/machine-id:ro \
+	-v /etc/machine-id:/root/machine-id:ro \
+	-v /tmp/Downloads:/root/Downloads \
+	-v "$DATA_DIR/lib/librewolf/profile":"$container_profile_path" \
+	-e DISPLAY=$DISPLAY \
+	--name anon-librewolf \
+	--rm \
+	librewolf --profile "$container_profile_path"
 }
 
 main "$@"

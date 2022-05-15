@@ -5,11 +5,14 @@
 		'shred',
 		'mat',
 		'webui',
-		'timezone',
+		'time',
 		'hostname',
 		'kalitorify',
 		'wtg',
 		'macchanger'
+		'hosts',
+		'system',
+		'decoy'
 	);
 
 	// Toggle a module

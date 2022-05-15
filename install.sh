@@ -74,7 +74,7 @@ install_anon() {
 	echo_info 'Installing anon'
 	[ -e "$tmp_path" ] && sudo rm -rf "$tmp_path"
 	sudo git clone -q https://github.com/r-jb/anon.git "$tmp_path" && \
-	sudo rsync -rauh --delete "$tmp_path" "$DATA_DIR/anon" && \
+	sudo rsync -rauh --delete --exclude "$DATA_DIR/anon/lib/librewolf/profile" "$tmp_path" "$DATA_DIR/anon" && \
 	sudo chmod +x "$DATA_DIR/anon/anon.sh" && \
 	sudo ln -sf "$DATA_DIR/anon/anon.sh" "$PROGRAM_DIR/anon"
 
@@ -89,6 +89,7 @@ install_anon() {
 
 	echo_success 'Installed anon'
 	install_web_traffic_generator
+	install_librewolf
 }
 
 install_kalitorify() {
@@ -114,6 +115,12 @@ install_web_traffic_generator() {
 	pip install requests && \
 	sudo wget -q -O "$DATA_DIR/anon/lib/gen.py" https://raw.githubusercontent.com/ReconInfoSec/web-traffic-generator/master/gen.py && \
 	echo_success 'Installed web-traffic-generator'
+}
+
+install_librewolf() {
+	cmd_exist docker || install_package docker.io
+	sudo systemctl start docker && \
+	sudo docker build --no-cache --pull --quiet --tag librewolf "$DATA_DIR/anon/lib/librewolf" && \
 }
 
 install "$@"
