@@ -121,6 +121,7 @@ install_librewolf() {
 	cmd_exist docker || install_package docker.io
 	sudo systemctl start docker && \
 	sudo docker build --no-cache --pull --quiet --tag librewolf "$DATA_DIR/anon/lib/librewolf" && \
+	echo_success 'Installed hardened librewolf'
 }
 
 install "$@"
