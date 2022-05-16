@@ -10,7 +10,7 @@ Copy and paste this in your terminal for a quick install.
 ## Usage
 
 ### Show usage
-`$ sudo anon webui start`
+`$ sudo anon webui`
 
 ### Start the webui module
 `$ sudo anon webui start`
@@ -20,3 +20,10 @@ Copy and paste this in your terminal for a quick install.
 
 ### Check the webui status
 `$ sudo anon webui`
+
+## Update
+To update, just execute the install script once again.
+
+To force the update, or skip confirmations, execute the script with -y, or use this one liner:
+
+`$ curl -fsSL https://github.com/r-jb/anon/raw/main/install.sh | sh -s -- -y`
