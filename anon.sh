@@ -198,7 +198,6 @@ mat() {
 	out=1
 	option_or_file="$1"
 	file="$2"
-	filename="`basename $file`"
 
 	case "`LOWER $option_or_file`" in
 		'rm'|'remove')
@@ -216,11 +215,12 @@ mat() {
 				if [ "$status" -eq '0' ]
 				then
 					out=0
+					filename="`basename $file`"
 					extension="${filename##*.}"
 					filename_without_extension="${filename%.*}"
 					echo_success "Cleaned file: $filename_without_extension.cleaned.$extension"
 				else
-					echo_error "Error while removing metadata of `basename $file`"
+					echo_error "Error while removing metadata of $filename"
 				fi
 			fi
 			;;
@@ -233,10 +233,11 @@ mat() {
 			then
 				echo_error 'File not found'
 			else
-				echo_info "Metadata of `basename $option_or_file`:"
+				filename="`basename $option_or_file`"
+				echo_info "Metadata of $filename:"
 				mat2 -s "$option_or_file" && \
 				out=0 || \
-				echo_error "Error while reading metadata of `basename $option_or_file`"
+				echo_error "Error while reading metadata of $filename"
 			fi
 	esac
 

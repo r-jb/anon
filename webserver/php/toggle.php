@@ -9,7 +9,7 @@
 		'hostname',
 		'kalitorify',
 		'wtg',
-		'macchanger'
+		'macchanger',
 		'hosts',
 		'system',
 		'decoy'
